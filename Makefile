@@ -1,6 +1,8 @@
 
 defconfig:
 	make -C busybox defconfig
+	sed -i 's/^CONFIG_TC=y$$/# CONFIG_TC is not set/' busybox/.config
+	sed -i 's/^# CONFIG_STATIC is not set$$/CONFIG_STATIC=y/' busybox/.config
 
 build:
 	make -C busybox install -j 16
@@ -23,6 +25,7 @@ qemu-system-x86_64:
 	cd qemu && ./configure --target-list=x86_64-softmmu
 	cd qemu && git am < ../patches/0001-hw-misc-add-qemu-pci-endpoint-controller-device.patch
 	cd qemu && git am < ../patches/0002-hw-misc-Introduce-a-epf-bridge-device.patch
+	cd qemu && git apply ../patches/0003-hw-misc-fix-endpoint-transfer-length.patch
 	make -C qemu -j 32
 
 umount:

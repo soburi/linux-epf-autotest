@@ -8,12 +8,18 @@ extract_msgid() {
   awk -F'/' '{print $5}' <<< ${url}
 }
 
-patch_url=$1
-msgid=`extract_msgid $patch_url`
-outdir="results/${msgid}"
+if [ "$#" != "0" ]; then
+  patch_url=$1
+  msgid=`extract_msgid $patch_url`
+  outdir="results/${msgid}"
+else
+  patch_url=""
+  msgid=""
+  outdir="results/linux"
+fi
 
 build_kernel() {
-  ./autopatch.sh linux $1
+  ./autopatch.sh linux "$@"
 }
 
 check_result() {
@@ -26,6 +32,7 @@ check_result() {
 
 launch_test() {
   epc_sock=/tmp/qemu-epc.sock
+  rm -f tests/rc/result.txt
 
   # launch qemu for pcie endpoint. (device side)
   ./launch_qemu.sh 1 ${outdir}/qemu.ep.log > ${outdir}/kernel.ep.log &
@@ -37,7 +44,8 @@ launch_test() {
   do
     sleep 1
     cnt=$(($cnt + 1))
-    if [ ${cnt} -eq 10 ]; then
+    if ! kill -0 "${pid}" 2>/dev/null || [ ${cnt} -ge 120 ]; then
+      echo "Endpoint failed to create ${epc_sock}; see ${outdir}/kernel.ep.log" >&2
       set +e
       kill ${pid}
       set -e
@@ -59,5 +67,9 @@ launch_test() {
 
 mkdir -p ${outdir}
 echo $patch_url > ${outdir}/lore.url.txt
-build_kernel ${msgid}
+if [ -n "${msgid}" ]; then
+  build_kernel "${msgid}"
+else
+  build_kernel
+fi
 launch_test

@@ -9,7 +9,7 @@ log=$2
 qemu=./qemu/build/qemu-system-x86_64
 
 run() {
-        ${qemu} \
+        exec ${qemu} \
                 -m 2g \
                 -kernel ./linux/arch/x86_64/boot/bzImage \
                 -append 'console=ttyS0 root=/dev/sda ro init=/init panic=-1' \

@@ -6,21 +6,24 @@ Subject: [PATCH] hack: misc: pci_endpoint_test: XXX: Don't merge this commit
 for the qemu epc testing, change irq type of TI epc, MSI into
 LEGACY_IRQ.
 ---
- drivers/misc/pci_endpoint_test.c | 1 +
- 1 file changed, 1 insertion(+)
+ drivers/misc/pci_endpoint_test.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/drivers/misc/pci_endpoint_test.c b/drivers/misc/pci_endpoint_test.c
 index 74ab5b5b9011..967860179e07 100644
 --- a/drivers/misc/pci_endpoint_test.c
 +++ b/drivers/misc/pci_endpoint_test.c
-@@ -1359,6 +1359,7 @@ static void pci_endpoint_test_remove(struct pci_dev *pdev)
- static const struct pci_endpoint_test_data default_data = {
- 	.test_reg_bar = BAR_0,
- 	.alignment = SZ_4K,
-+	.irq_type = IRQ_TYPE_INTX,
- };
+@@ -1027,8 +1027,8 @@ static int pci_endpoint_test_set_irq(struct pci_endpoint_test *test,
+ 		else if (test->ep_caps & CAP_INTX)
+ 			req_irq_type = PCITEST_IRQ_TYPE_INTX;
+ 		else
+-			/* fallback to MSI if no caps defined */
+-			req_irq_type = PCITEST_IRQ_TYPE_MSI;
++			/* QEMU endpoint bridge only supports INTx. */
++			req_irq_type = PCITEST_IRQ_TYPE_INTX;
+ 	}
  
- static const struct pci_endpoint_test_data am654_data = {
+ 	if (test->irq_type == req_irq_type)
 -- 
 2.53.0
 

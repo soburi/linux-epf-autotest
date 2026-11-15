@@ -303,7 +303,6 @@ index 000000000000..03a643158b3f
 +
 +static const struct pci_epc_features qemu_epc_features = {
 +	.linkup_notifier = false,
-+	.core_init_notifier = false,
 +	.msi_capable = false,
 +	.msix_capable = false,
 +};
@@ -408,6 +407,7 @@ index 000000000000..03a643158b3f
 +	}
 +
 +	pci_set_master(pdev);
++	pci_epc_init_notify(epc);
 +
 +	return 0;
 +
@@ -418,14 +418,14 @@ index 000000000000..03a643158b3f
 +err_disable_pdev:
 +	pci_disable_device(pdev);
 +err_release_epc:
-+	devm_pci_epc_destroy(dev, epc);
++	/* devm_pci_epc_create() releases the EPC on probe failure. */
 +err_qep_kfree:
 +	devm_kfree(dev, qep);
 +
 +	return err;
 +}
 +
-+#define PCI_DEVICE_ID_REDHAT_PCI_EP 0x0014
++#define PCI_DEVICE_ID_REDHAT_PCI_EP 0x0015
 +
 +static const struct pci_device_id qemu_ep_id_table[] = {
 +	{ PCI_DEVICE(PCI_VENDOR_ID_REDHAT, PCI_DEVICE_ID_REDHAT_PCI_EP) },
