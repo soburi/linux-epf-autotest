@@ -16,9 +16,8 @@ rootfs.img:
 	sudo umount -d ./mnt
 	cp rootfs.img rootfs.rc.img
 
-pcitest:
-	make -C linux/tools/pci
-	cp linux/tools/pci/pcitest ./tests/rc
+pci_endpoint_test:
+	OUTPUT=$(PWD)/tests/rc make -C linux/tools/testing/selftests/pci_endpoint/
 
 qemu-system-x86_64:
 	cd qemu && ./configure --target-list=x86_64-softmmu

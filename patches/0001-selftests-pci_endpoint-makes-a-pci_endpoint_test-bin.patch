@@ -1,0 +1,24 @@
+From 1d443071ff4b33641a94dd58c1772d063314dd2a Mon Sep 17 00:00:00 2001
+From: TOKITA Hiroshi <tokita.hiroshi@gmail.com>
+Date: Sun, 15 Nov 2026 11:12:22 +0900
+Subject: [PATCH] selftests: pci_endpoint: makes a pci_endpoint_test binary
+ static
+
+---
+ tools/testing/selftests/pci_endpoint/Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/testing/selftests/pci_endpoint/Makefile b/tools/testing/selftests/pci_endpoint/Makefile
+index bf21ebf20b4a..ef30e9113d5f 100644
+--- a/tools/testing/selftests/pci_endpoint/Makefile
++++ b/tools/testing/selftests/pci_endpoint/Makefile
+@@ -1,5 +1,5 @@
+ # SPDX-License-Identifier: GPL-2.0
+-CFLAGS += -O2 -Wl,-no-as-needed -Wall $(KHDR_INCLUDES)
++CFLAGS += -O2 -Wl,-no-as-needed -Wall $(KHDR_INCLUDES) -static
+ LDFLAGS += -lrt -lpthread -lm
+ 
+ TEST_GEN_PROGS = pci_endpoint_test
+-- 
+2.53.0
+

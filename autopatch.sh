@@ -22,7 +22,7 @@ git stash -u
 git checkout remotes/pci/main
 apply_patches \
   ../patches/0001-PCI-qemu-Add-QEMU-PCIe-endpoint-controller-driver.patch \
-  ../patches/0001-tools-PCI-makes-a-pcitest-binary-static.patch \
+  ../patches/0001-selftests-pci_endpoint-makes-a-pci_endpoint_test-bin.patch \
   ../patches/0001-hack-misc-pci_endpoint_test-XXX-Don-t-merge-this-com.patch \
   > ../${outdir}/pre_patches_apply.log
 git am ../${outdir}/*.mbx > ../${outdir}/patch_apply.log

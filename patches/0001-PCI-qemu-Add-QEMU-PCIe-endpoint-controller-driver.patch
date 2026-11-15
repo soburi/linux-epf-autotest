@@ -1,4 +1,4 @@
-From abaca286622b96bbd93a3ae8b1d94062764ef7a1 Mon Sep 17 00:00:00 2001
+From bfa4fe3247669580c713e273c2bd886d925dafd2 Mon Sep 17 00:00:00 2001
 From: Shunsuke Mie <mie@igel.co.jp>
 Date: Thu, 7 Mar 2024 11:40:48 +0900
 Subject: [PATCH] PCI: qemu: Add QEMU PCIe endpoint controller driver
@@ -11,10 +11,10 @@ Subject: [PATCH] PCI: qemu: Add QEMU PCIe endpoint controller driver
  create mode 100644 drivers/pci/controller/pcie-qemu-ep.c
 
 diff --git a/drivers/pci/controller/Kconfig b/drivers/pci/controller/Kconfig
-index e534c02ee34f..31aeaee863fb 100644
+index 5aaed8ac6e44..5ff5e5417566 100644
 --- a/drivers/pci/controller/Kconfig
 +++ b/drivers/pci/controller/Kconfig
-@@ -353,6 +353,13 @@ config PCIE_XILINX_CPM
+@@ -384,6 +384,13 @@ config PCIE_XILINX_CPM
  	  Say 'Y' here if you want kernel support for the
  	  Xilinx Versal CPM host bridge.
  
@@ -29,13 +29,13 @@ index e534c02ee34f..31aeaee863fb 100644
  source "drivers/pci/controller/dwc/Kconfig"
  source "drivers/pci/controller/mobiveil/Kconfig"
 diff --git a/drivers/pci/controller/Makefile b/drivers/pci/controller/Makefile
-index f2b19e6174af..67f15f11610e 100644
+index ac8db283f0fe..e844f7126a7a 100644
 --- a/drivers/pci/controller/Makefile
 +++ b/drivers/pci/controller/Makefile
-@@ -40,6 +40,7 @@ obj-$(CONFIG_PCI_LOONGSON) += pci-loongson.o
- obj-$(CONFIG_PCIE_HISI_ERR) += pcie-hisi-error.o
+@@ -41,6 +41,7 @@ obj-$(CONFIG_PCIE_HISI_ERR) += pcie-hisi-error.o
  obj-$(CONFIG_PCIE_APPLE) += pcie-apple.o
  obj-$(CONFIG_PCIE_MT7621) += pcie-mt7621.o
+ obj-$(CONFIG_PCIE_ASPEED) += pcie-aspeed.o
 +obj-$(CONFIG_PCIE_QEMU_EP) += pcie-qemu-ep.o
  
  # pcie-hisi.o quirks are needed even without CONFIG_PCIE_DW
@@ -456,5 +456,5 @@ index 000000000000..03a643158b3f
 +}
 +module_exit(pcie_qemu_ep_exit);
 -- 
-2.25.1
+2.53.0
 
