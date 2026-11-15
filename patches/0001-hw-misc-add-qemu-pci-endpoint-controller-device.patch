@@ -1402,7 +1402,7 @@ index 0000000000..88f793db98
 +
 +static void qemu_epc_exit(PCIDevice *dev) {}
 +
-+static void qemu_epc_class_init(ObjectClass *klass, void *data)
++static void qemu_epc_class_init(ObjectClass *klass, const void *data)
 +{
 +    DeviceClass *dc = DEVICE_CLASS(klass);
 +    PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
