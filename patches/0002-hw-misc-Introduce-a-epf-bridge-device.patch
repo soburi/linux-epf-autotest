@@ -1,4 +1,4 @@
-From 7b844df47174b8f654fb9b7faa5e713c7efc26de Mon Sep 17 00:00:00 2001
+From 04c5d2dccf7073376f24ce21e719ccbf44e6d275 Mon Sep 17 00:00:00 2001
 From: Shunsuke Mie <mie@igel.co.jp>
 Date: Thu, 14 Sep 2023 15:40:24 +0900
 Subject: [PATCH 2/2] hw/misc: Introduce a epf-bridge device
@@ -12,11 +12,11 @@ Signed-off-by: Shunsuke Mie <mie@igel.co.jp>
  create mode 100644 hw/misc/epf-bridge.c
 
 diff --git a/hw/misc/Kconfig b/hw/misc/Kconfig
-index 755c473788e4..89766404e310 100644
+index 8375b710ba..2e1daeb87d 100644
 --- a/hw/misc/Kconfig
 +++ b/hw/misc/Kconfig
-@@ -200,6 +200,10 @@ config IOSB
- config XLNX_VERSAL_TRNG
+@@ -257,6 +257,10 @@ config XLNX_VERSAL_TRNG
+ config XLNX_ZYNQ_DDRC
      bool
  
 +config PCI_EPF_BRIDGE
@@ -28,7 +28,7 @@ index 755c473788e4..89766404e310 100644
      bool
 diff --git a/hw/misc/epf-bridge.c b/hw/misc/epf-bridge.c
 new file mode 100644
-index 000000000000..2713af436658
+index 0000000000..2713af4366
 --- /dev/null
 +++ b/hw/misc/epf-bridge.c
 @@ -0,0 +1,424 @@
@@ -457,10 +457,10 @@ index 000000000000..2713af436658
 +
 +type_init(epf_bridge_register_type);
 diff --git a/hw/misc/meson.build b/hw/misc/meson.build
-index 36f996b1b25f..b4e08f64682b 100644
+index 339e8ef622..e4122907fa 100644
 --- a/hw/misc/meson.build
 +++ b/hw/misc/meson.build
-@@ -152,6 +152,7 @@ specific_ss.add(when: 'CONFIG_MIPS_ITU', if_true: files('mips_itu.c'))
+@@ -166,6 +166,7 @@ specific_ss.add(when: 'CONFIG_RISCV_MIPS_CPC', if_true: files('riscv_cpc.c'))
  
  system_ss.add(when: 'CONFIG_SBSA_REF', if_true: files('sbsa_ec.c'))
  
@@ -469,5 +469,5 @@ index 36f996b1b25f..b4e08f64682b 100644
  
  # HPPA devices
 -- 
-2.25.1
+2.53.0
 

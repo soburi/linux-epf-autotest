@@ -1,4 +1,4 @@
-From 8e3eeb7688b7169cdd7d7395135b0f46a66d3aa8 Mon Sep 17 00:00:00 2001
+From 370569cb92eb13525a5ef66cf6d37d05161bbdab Mon Sep 17 00:00:00 2001
 From: Shunsuke Mie <mie@igel.co.jp>
 Date: Mon, 14 Aug 2023 13:47:10 +0900
 Subject: [PATCH 1/2] hw/misc: add qemu pci endpoint controller device
@@ -17,11 +17,11 @@ Signed-off-by: Shunsuke Mie <mie@igel.co.jp>
  create mode 100644 hw/misc/qemu-epc.c
 
 diff --git a/hw/misc/Kconfig b/hw/misc/Kconfig
-index cc8a8c1418ff..755c473788e4 100644
+index 1543ee6653..8375b710ba 100644
 --- a/hw/misc/Kconfig
 +++ b/hw/misc/Kconfig
-@@ -200,4 +200,8 @@ config IOSB
- config XLNX_VERSAL_TRNG
+@@ -257,4 +257,8 @@ config XLNX_VERSAL_TRNG
+ config XLNX_ZYNQ_DDRC
      bool
  
 +config QEMU_EPC
@@ -30,10 +30,10 @@ index cc8a8c1418ff..755c473788e4 100644
 +
  source macio/Kconfig
 diff --git a/hw/misc/meson.build b/hw/misc/meson.build
-index 36c20d5637f7..36f996b1b25f 100644
+index 23265f6035..339e8ef622 100644
 --- a/hw/misc/meson.build
 +++ b/hw/misc/meson.build
-@@ -152,5 +152,7 @@ specific_ss.add(when: 'CONFIG_MIPS_ITU', if_true: files('mips_itu.c'))
+@@ -166,5 +166,7 @@ specific_ss.add(when: 'CONFIG_RISCV_MIPS_CPC', if_true: files('riscv_cpc.c'))
  
  system_ss.add(when: 'CONFIG_SBSA_REF', if_true: files('sbsa_ec.c'))
  
@@ -43,7 +43,7 @@ index 36c20d5637f7..36f996b1b25f 100644
  system_ss.add(when: 'CONFIG_LASI', if_true: files('lasi.c'))
 diff --git a/hw/misc/qemu-epc-comm.c b/hw/misc/qemu-epc-comm.c
 new file mode 100644
-index 000000000000..ea51ca8058ba
+index 0000000000..ea51ca8058
 --- /dev/null
 +++ b/hw/misc/qemu-epc-comm.c
 @@ -0,0 +1,531 @@
@@ -580,7 +580,7 @@ index 000000000000..ea51ca8058ba
 +}
 diff --git a/hw/misc/qemu-epc-comm.h b/hw/misc/qemu-epc-comm.h
 new file mode 100644
-index 000000000000..4df04f742477
+index 0000000000..4df04f7424
 --- /dev/null
 +++ b/hw/misc/qemu-epc-comm.h
 @@ -0,0 +1,159 @@
@@ -745,7 +745,7 @@ index 000000000000..4df04f742477
 +#endif /* QEMU_EPC_COMM_H */
 diff --git a/hw/misc/qemu-epc.c b/hw/misc/qemu-epc.c
 new file mode 100644
-index 000000000000..88f793db9819
+index 0000000000..88f793db98
 --- /dev/null
 +++ b/hw/misc/qemu-epc.c
 @@ -0,0 +1,686 @@
@@ -1436,17 +1436,17 @@ index 000000000000..88f793db9819
 +
 +type_init(qemu_epc_register_type);
 diff --git a/include/hw/pci/pci.h b/include/hw/pci/pci.h
-index fa6313aabc43..0c11a1a25867 100644
+index f2448e941a..22ca76519f 100644
 --- a/include/hw/pci/pci.h
 +++ b/include/hw/pci/pci.h
-@@ -115,6 +115,7 @@ extern bool pci_available;
- #define PCI_DEVICE_ID_REDHAT_PVPANIC     0x0011
+@@ -121,6 +121,7 @@ extern bool pci_available;
  #define PCI_DEVICE_ID_REDHAT_ACPI_ERST   0x0012
  #define PCI_DEVICE_ID_REDHAT_UFS         0x0013
-+#define PCI_DEVICE_ID_REDHAT_QEMU_EPC    0x0014
+ #define PCI_DEVICE_ID_REDHAT_RISCV_IOMMU 0x0014
++#define PCI_DEVICE_ID_REDHAT_QEMU_EPC    0x0015
  #define PCI_DEVICE_ID_REDHAT_QXL         0x0100
  
  #define FMT_PCIBUS                      PRIx64
 -- 
-2.25.1
+2.53.0
 
