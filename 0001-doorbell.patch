@@ -1,0 +1,292 @@
+From c1006857abafc99a9eb1f9d7fe0d595cf9a78e65 Mon Sep 17 00:00:00 2001
+From: TOKITA Hiroshi <tokita.hiroshi@gmail.com>
+Date: Sun, 15 Nov 2026 22:57:54 +0900
+Subject: [PATCH] doorbell
+
+---
+ hw/misc/epf-bridge.c | 116 +++++++++++++++++++++++++++++++++++++++++++
+ hw/misc/qemu-epc.c   |  76 +++++++++++++++++++++++++++-
+ 2 files changed, 191 insertions(+), 1 deletion(-)
+
+diff --git a/hw/misc/epf-bridge.c b/hw/misc/epf-bridge.c
+index 9873989e4a..affe4529c9 100644
+--- a/hw/misc/epf-bridge.c
++++ b/hw/misc/epf-bridge.c
+@@ -317,6 +317,100 @@ static int epf_bridge_setup_bars(EPFBridgeState *s, PCIDevice *pci_dev)
+     return 0;
+ }
+ 
++#define EPF_BRIDGE_MAX_CAPS 16
++
++/*
++ * Copy the vendor specific capabilities of the endpoint function. The other
++ * kinds have a length the bridge cannot tell, and MSI and MSI-X are not
++ * supported yet.
++ */
++static int epf_bridge_setup_caps(EPFBridgeState *s, PCIDevice *pci_dev,
++                                 Error **errp)
++{
++    struct {
++        uint8_t off;
++        uint8_t len;
++    } caps[EPF_BRIDGE_MAX_CAPS];
++    int num = 0;
++    uint32_t data;
++    uint8_t off;
++    int err;
++
++    err = qemu_epc_comm_config_read(s->req_fd, PCI_STATUS, &data);
++    if (err) {
++        return err;
++    }
++
++    if (!((data >> 16) & PCI_STATUS_CAP_LIST)) {
++        return 0;
++    }
++
++    err = qemu_epc_comm_config_read(s->req_fd, PCI_CAPABILITY_LIST, &data);
++    if (err) {
++        return err;
++    }
++
++    for (off = data & 0xfc; off != 0 && num < EPF_BRIDGE_MAX_CAPS;) {
++        uint8_t next;
++
++        err = qemu_epc_comm_config_read(s->req_fd, off, &data);
++        if (err) {
++            return err;
++        }
++
++        next = (data >> 8) & 0xfc;
++        if ((data & 0xff) == PCI_CAP_ID_VNDR) {
++            caps[num].off = off;
++            caps[num].len = (data >> 16) & 0xff;
++            num++;
++        } else {
++            epf_brd_debug("skip capability 0x%x at 0x%x\n", data & 0xff, off);
++        }
++
++        off = next;
++    }
++
++    /* pci_add_capability() inserts at the head, so keep the order. */
++    while (num-- > 0) {
++        uint8_t len = caps[num].len;
++        int pos;
++
++        if (len < 4 || caps[num].off + len > PCI_CONFIG_SPACE_SIZE) {
++            error_setg(errp, "invalid capability length %d", len);
++            return -1;
++        }
++
++        pos = pci_add_capability(pci_dev, PCI_CAP_ID_VNDR, caps[num].off, len,
++                                 errp);
++        if (pos < 0) {
++            return pos;
++        }
++
++        /* The first dword holds the ID and the link, which are set. */
++        for (uint8_t i = 4; i < len; i += 4) {
++            err = qemu_epc_comm_config_read(s->req_fd, caps[num].off + i,
++                                            &data);
++            if (err) {
++                return err;
++            }
++
++            stl_le_p(pci_dev->config + pos + i, data);
++        }
++
++        /* Bytes of the first dword after the link, such as the length. */
++        err = qemu_epc_comm_config_read(s->req_fd, caps[num].off, &data);
++        if (err) {
++            return err;
++        }
++
++        pci_dev->config[pos + 2] = (data >> 16) & 0xff;
++        pci_dev->config[pos + 3] = (data >> 24) & 0xff;
++        epf_brd_debug("capability at 0x%x, length %d\n", pos, len);
++    }
++
++    return 0;
++}
++
+ static int epf_bridge_setup_pci_cfg_hdr(EPFBridgeState *s, PCIDevice *pci_dev)
+ {
+     uint32_t data;
+@@ -349,12 +443,23 @@ static int epf_bridge_setup_pci_cfg_hdr(EPFBridgeState *s, PCIDevice *pci_dev)
+     pci_config_set_revision(pci_dev->config, revision);
+     pci_config_set_class(pci_dev->config, class_id);
+ 
++    err = qemu_epc_comm_config_read(s->req_fd, PCI_SUBSYSTEM_VENDOR_ID, &data);
++    if (err) {
++        epf_brd_debug("failed to load configuration space: subsystem: %d\n",
++                      err);
++        return err;
++    }
++
++    pci_set_word(pci_dev->config + PCI_SUBSYSTEM_VENDOR_ID, data & 0xffff);
++    pci_set_word(pci_dev->config + PCI_SUBSYSTEM_ID, data >> 16);
++
+     return 0;
+ }
+ 
+ static void epf_bridge_realize(PCIDevice *pci_dev, Error ** errp)
+ {
+     EPFBridgeState *s = EPF_BRIDGE(pci_dev);
++    Error *local_err = NULL;
+     int err;
+ 
+     s->req_fd = epf_bridge_connect_epc(QEMU_EPC_SOCK_PATH);
+@@ -381,6 +486,17 @@ static void epf_bridge_realize(PCIDevice *pci_dev, Error ** errp)
+         return;
+     }
+ 
++    err = epf_bridge_setup_caps(s, pci_dev, &local_err);
++    if (err) {
++        if (local_err) {
++            error_propagate_prepend(errp, local_err,
++                                    "failed to setup capabilities: ");
++        } else {
++            error_setg(errp, "failed to setup capabilities");
++        }
++        return;
++    }
++
+     err = epf_bridge_setup_bars(s, pci_dev);
+     if (err) {
+         error_setg(errp, "failed to setup BAR");
+diff --git a/hw/misc/qemu-epc.c b/hw/misc/qemu-epc.c
+index 0d232f803c..468c9f72b7 100644
+--- a/hw/misc/qemu-epc.c
++++ b/hw/misc/qemu-epc.c
+@@ -5,6 +5,7 @@
+ #include "qemu/osdep.h"
+ #include "qom/object.h"
+ #include "hw/pci/pci_device.h"
++#include "qemu/main-loop.h"
+ 
+ #include "qemu-epc-comm.h"
+ 
+@@ -46,6 +47,12 @@ struct QemuEPCState {
+     uint8_t bar_mask;
+     uint8_t bar_no;
+     uint8_t irq_type;
++
++    /* doorbell: a range of a BAR whose writes interrupt the endpoint */
++    uint32_t db_ctrl;
++    uint32_t db_offset;
++    uint32_t db_size;
++    uint32_t db_status;
+ };
+ 
+ #define TYPE_QEMU_EPC "qemu-epc"
+@@ -80,10 +87,49 @@ enum {
+     QEMU_EPC_CTRL_OFF_OB_MAP_PHYS = 0x28,
+     QEMU_EPC_CTRL_OFF_OB_MAP_PCI = 0x30,
+     QEMU_EPC_CTRL_OFF_OB_MAP_SIZE = 0x38,
++    QEMU_EPC_CTRL_OFF_DB_CTRL = 0x40,
++    QEMU_EPC_CTRL_OFF_DB_OFFSET = 0x44,
++    QEMU_EPC_CTRL_OFF_DB_SIZE = 0x48,
++    QEMU_EPC_CTRL_OFF_DB_STATUS = 0x4c,
+ 
+-    QEMU_EPC_CTRL_SIZE = QEMU_EPC_CTRL_OFF_OB_MAP_SIZE + sizeof(uint64_t)
++    QEMU_EPC_CTRL_SIZE = QEMU_EPC_CTRL_OFF_DB_STATUS + sizeof(uint32_t)
+ };
+ 
++/* DB_CTRL: the BAR that holds the doorbell range, and its enable bit */
++#define QEMU_EPC_DB_CTRL_BAR_MASK 0x7
++#define QEMU_EPC_DB_CTRL_ENABLE (1U << 31)
++/* DB_STATUS: pending doorbell, write 1 to clear and deassert INTx */
++#define QEMU_EPC_DB_STATUS_PENDING 0x1
++
++static void qemu_epc_db_update_irq(void *opaque)
++{
++    QemuEPCState *s = opaque;
++
++    pci_set_irq(&s->dev, !!(qatomic_read(&s->db_status) &
++                            QEMU_EPC_DB_STATUS_PENDING));
++}
++
++/* Called from the communication thread, without the BQL */
++static void qemu_epc_db_check_write(QemuEPCState *s, int idx, size_t offset,
++                                    size_t length)
++{
++    uint32_t ctrl = qatomic_read(&s->db_ctrl);
++    uint32_t db_offset = qatomic_read(&s->db_offset);
++    uint32_t db_size = qatomic_read(&s->db_size);
++
++    if (!(ctrl & QEMU_EPC_DB_CTRL_ENABLE) ||
++        idx != (ctrl & QEMU_EPC_DB_CTRL_BAR_MASK)) {
++        return;
++    }
++
++    if (offset >= (size_t)db_offset + db_size || offset + length <= db_offset) {
++        return;
++    }
++
++    qatomic_or(&s->db_status, QEMU_EPC_DB_STATUS_PENDING);
++    aio_bh_schedule_oneshot(qemu_get_aio_context(), qemu_epc_db_update_irq, s);
++}
++
+ static uint64_t qemu_epc_mmio_ctrl_read(void *opaque, hwaddr addr,
+                                         unsigned size)
+ {
+@@ -102,6 +148,14 @@ static uint64_t qemu_epc_mmio_ctrl_read(void *opaque, hwaddr addr,
+         return 0;
+     case QEMU_EPC_CTRL_OFF_OB_MAP_MASK:
+         return s->ob_map_mask;
++    case QEMU_EPC_CTRL_OFF_DB_CTRL:
++        return s->db_ctrl;
++    case QEMU_EPC_CTRL_OFF_DB_OFFSET:
++        return s->db_offset;
++    case QEMU_EPC_CTRL_OFF_DB_SIZE:
++        return s->db_size;
++    case QEMU_EPC_CTRL_OFF_DB_STATUS:
++        return qatomic_read(&s->db_status);
+     default:
+         qemu_epc_debug("unexpected read found: %ld\n", addr);
+     }
+@@ -156,6 +210,10 @@ static int qemu_epc_handle_tlp_mw(QemuEPCState *s, int fd,
+ 
+     pci_dma_unmap(&s->dev, buf, length, DMA_DIRECTION_FROM_DEVICE, length);
+ 
++    if (!err) {
++        qemu_epc_db_check_write(s, idx, offset, length);
++    }
++
+     return err;
+ }
+ 
+@@ -374,6 +432,19 @@ static void qemu_epc_mmio_ctrl_write(void *opaque, hwaddr addr, uint64_t val,
+         *tmp = (*tmp & 0xffffffff) | (val << 32);
+         qemu_epc_debug("ob map size: %d: 0x%lx\n", s->ob_idx, *tmp);
+         break;
++    case QEMU_EPC_CTRL_OFF_DB_CTRL:
++        qatomic_set(&s->db_ctrl, val);
++        break;
++    case QEMU_EPC_CTRL_OFF_DB_OFFSET:
++        qatomic_set(&s->db_offset, val);
++        break;
++    case QEMU_EPC_CTRL_OFF_DB_SIZE:
++        qatomic_set(&s->db_size, val);
++        break;
++    case QEMU_EPC_CTRL_OFF_DB_STATUS:
++        qatomic_and(&s->db_status, ~(uint32_t)val);
++        qemu_epc_db_update_irq(s);
++        break;
+     default:
+         qemu_epc_debug("CTRL write: invalid address 0x%lx\n", addr);
+     }
+@@ -629,6 +700,9 @@ static void qemu_epc_realize(PCIDevice *pci_dev, Error **errp)
+ {
+     QemuEPCState *s = QEMU_EPC(pci_dev);
+ 
++    /* INTx reports the doorbell to the endpoint */
++    pci_config_set_interrupt_pin(pci_dev->config, 1);
++
+     memory_region_init_io(&s->ctrl_mr, OBJECT(s), &qemu_epc_mmio_ctrl_ops, s,
+                           "qemu-epc/ctrl", pow2ceil(QEMU_EPC_CTRL_SIZE));
+     memory_region_init_io(&s->pci_cfg_mr, OBJECT(s), &qemu_epc_mmio_pci_cfg_ops,
+-- 
+2.53.0
+

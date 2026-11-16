@@ -1,0 +1,204 @@
+From 1436e32f356d8ea2f781172ef7dc684b1ee2649d Mon Sep 17 00:00:00 2001
+From: TOKITA Hiroshi <tokita.hiroshi@gmail.com>
+Date: Sun, 15 Nov 2026 22:29:53 +0900
+Subject: [PATCH] update
+
+---
+ hw/misc/qemu-epc-comm.c | 27 ++++++++++++++++-----------
+ hw/misc/qemu-epc-comm.h |  4 ++--
+ hw/misc/qemu-epc.c      |  7 ++++---
+ 3 files changed, 22 insertions(+), 16 deletions(-)
+
+diff --git a/hw/misc/qemu-epc-comm.c b/hw/misc/qemu-epc-comm.c
+index ea51ca8058..b1237fdb36 100644
+--- a/hw/misc/qemu-epc-comm.c
++++ b/hw/misc/qemu-epc-comm.c
+@@ -51,7 +51,7 @@ int qemu_epc_comm_recv_msg(int fd, struct qemu_epc_msg_hdr *hdr)
+ {
+     ssize_t size;
+ 
+-    size = recv(fd, hdr, sizeof(*hdr), 0);
++    size = recv(fd, hdr, sizeof(*hdr), MSG_WAITALL);
+     if (size != sizeof(*hdr)) {
+         qemu_log("%s: invalid: %ld != %ld\n", __func__, size, sizeof(*hdr));
+         return -1;
+@@ -73,7 +73,7 @@ int qemu_epc_comm_check_protcol_ver(int fd)
+         return -1;
+     }
+ 
+-    size = recv(fd, &ver, sizeof(ver), 0);
++    size = recv(fd, &ver, sizeof(ver), MSG_WAITALL);
+     if (size != sizeof(ver)) {
+         return -1;
+     }
+@@ -171,7 +171,7 @@ int qemu_epc_comm_req_bar(int fd, int idx, struct pci_bar *bar)
+         return -1;
+     }
+ 
+-    size = recv(fd, bar, sizeof(*bar), 0);
++    size = recv(fd, bar, sizeof(*bar), MSG_WAITALL);
+     if (size != sizeof(*bar)) {
+         return -1;
+     }
+@@ -196,6 +196,7 @@ int qemu_epc_comm_comp_with_data(int fd, void *buf, size_t length)
+     struct pci_tlp_comp tlp = {
+         .dw0.fmt_type = PCI_TLP_TYPE_CPLD,
+         .dw0.length = length >> 2,
++        .dw0.tmp = length & 3,
+     };
+     ssize_t size;
+ 
+@@ -217,7 +218,7 @@ static int _qemu_epc_comm_recv_comp_with_data(int fd, void *buf, size_t length)
+     struct pci_tlp_comp tlp;
+     ssize_t size;
+ 
+-    size = recv(fd, &tlp, sizeof(tlp), 0);
++    size = recv(fd, &tlp, sizeof(tlp), MSG_WAITALL);
+     if (size != sizeof(tlp)) {
+         return -1;
+     }
+@@ -226,7 +227,7 @@ static int _qemu_epc_comm_recv_comp_with_data(int fd, void *buf, size_t length)
+         return -1;
+     }
+ 
+-    size = recv(fd, buf, length, 0);
++    size = recv(fd, buf, length, MSG_WAITALL);
+     if (size != length) {
+         return -1;
+     }
+@@ -239,7 +240,7 @@ int qemu_epc_comm_recv_tlp(int fd, uint32_t hdr[4])
+     ssize_t size, rvsize;
+     void *ptr;
+     struct pci_tlp_hdr_dw0 *dw0;
+-    size = recv(fd, &hdr[0], sizeof(hdr[0]), 0);
++    size = recv(fd, &hdr[0], sizeof(hdr[0]), MSG_WAITALL);
+     if (size != sizeof(hdr[0])) {
+         return -1;
+     }
+@@ -247,7 +248,7 @@ int qemu_epc_comm_recv_tlp(int fd, uint32_t hdr[4])
+     dw0 = (struct pci_tlp_hdr_dw0 *)&hdr[0];
+     switch (dw0->fmt_type) {
+     case PCI_TLP_TYPE_CR0:
+-        size = recv(fd, &hdr[1], sizeof(hdr[1]) * 2, 0);
++        size = recv(fd, &hdr[1], sizeof(hdr[1]) * 2, MSG_WAITALL);
+         if (size != sizeof(hdr[1]) * 2) {
+             qemu_log("%s:%d receive err 0x%lx != 0x%lx\n", __func__, __LINE__,
+                      size, sizeof(hdr[1]) * 2);
+@@ -260,8 +261,8 @@ int qemu_epc_comm_recv_tlp(int fd, uint32_t hdr[4])
+         rvsize = sizeof(hdr[1]) * 3;
+         ptr = &hdr[1];
+         while (1) {
+-            size = recv(fd, ptr, rvsize, 0);
+-            if (size < 0) {
++            size = recv(fd, ptr, rvsize, MSG_WAITALL);
++            if (size <= 0) {
+                 qemu_log("%s:%d receive err: %ld\n", __func__, __LINE__, size);
+                 return -1;
+             }
+@@ -324,7 +325,7 @@ int qemu_epc_comm_config_read(int fd, size_t offset, uint32_t *data)
+ 
+ size_t qemu_epc_comm_tlp_data_length(struct pci_tlp_hdr_dw0 *dw0)
+ {
+-    return (size_t)dw0->length << 2;
++    return ((size_t)dw0->length << 2) | (dw0->tmp & 3);
+ }
+ 
+ int qemu_epc_comm_bar_read(int fd, int idx, hwaddr offset, void *data,
+@@ -337,6 +338,7 @@ int qemu_epc_comm_bar_read(int fd, int idx, hwaddr offset, void *data,
+     struct pci_tlp_mem tlp = {
+         .dw0.fmt_type = PCI_TLP_TYPE_MR,
+         .dw0.length = length >> 2,
++        .dw0.tmp = length & 3,
+         .dw23.laddr = (uint32_t)offset,
+         .dw23.haddr = offset >> 32,
+     };
+@@ -372,6 +374,7 @@ int qemu_epc_comm_bar_write(int fd, int idx, hwaddr offset, void *data,
+     struct pci_tlp_mem tlp = {
+         .dw0.fmt_type = PCI_TLP_TYPE_MW,
+         .dw0.length = length >> 2,
++        .dw0.tmp = length & 3,
+         .dw23.laddr = (uint32_t)offset,
+         .dw23.haddr = offset >> 32,
+     };
+@@ -406,6 +409,7 @@ int qemu_epc_comm_mem_read(int fd, hwaddr pci, void *data, size_t length)
+     struct pci_tlp_mem tlp = {
+         .dw0.fmt_type = PCI_TLP_TYPE_MR,
+         .dw0.length = length >> 2,
++        .dw0.tmp = length & 3,
+         .dw23.laddr = (uint32_t)pci,
+         .dw23.haddr = pci >> 32,
+     };
+@@ -433,6 +437,7 @@ int qemu_epc_comm_mem_write(int fd, hwaddr pci, void *data, size_t length)
+     struct pci_tlp_mem tlp = {
+         .dw0.fmt_type = PCI_TLP_TYPE_MW,
+         .dw0.length = length >> 2,
++        .dw0.tmp = length & 3,
+         .dw23.laddr = (uint32_t)pci,
+         .dw23.haddr = pci >> 32,
+     };
+@@ -463,7 +468,7 @@ int qemu_epc_comm_load_data(int fd, void *dest, size_t length)
+ {
+     ssize_t size;
+ 
+-    size = recv(fd, dest, length, 0);
++    size = recv(fd, dest, length, MSG_WAITALL);
+     if (size != length) {
+         return -1;
+     }
+diff --git a/hw/misc/qemu-epc-comm.h b/hw/misc/qemu-epc-comm.h
+index 4df04f7424..305a90bdb3 100644
+--- a/hw/misc/qemu-epc-comm.h
++++ b/hw/misc/qemu-epc-comm.h
+@@ -28,7 +28,7 @@ struct qemu_epc_msg_hdr {
+     };
+ } __attribute__((packed));
+ 
+-#define QEMU_EPC_PROTOCOL_VER 0x00000001
++#define QEMU_EPC_PROTOCOL_VER 0x00000002
+ 
+ int qemu_epc_comm_start_server(int *srv_fd);
+ void qemu_epc_comm_shutdown_server(int clt_fd, int srv_fd);
+@@ -73,7 +73,7 @@ int qemu_epc_comm_resp_irq_info(int fd, uint8_t int_pin);
+ 
+ struct pci_tlp_hdr_dw0 {
+     uint8_t fmt_type;
+-    uint8_t tmp;
++    uint8_t tmp; /* Byte remainder of the private protocol payload length. */
+     uint8_t tmp2:6;
+     uint16_t length:10;
+ } __attribute__((packed));
+diff --git a/hw/misc/qemu-epc.c b/hw/misc/qemu-epc.c
+index eeb7628036..0d232f803c 100644
+--- a/hw/misc/qemu-epc.c
++++ b/hw/misc/qemu-epc.c
+@@ -59,7 +59,7 @@ enum {
+     QEMU_EPC_BAR_OB_WINDOW = 3,
+ };
+ 
+-#define QEMU_EPC_OB_WINDOW_SIZE 0x100000
++#define QEMU_EPC_OB_WINDOW_SIZE 0x400000
+ #define QEMU_EPC_NUM_OF_OB_MAPS 0x10
+ 
+ struct qemu_epc_ob_map_reg {
+@@ -97,7 +97,7 @@ static uint64_t qemu_epc_mmio_ctrl_read(void *opaque, hwaddr addr,
+     case QEMU_EPC_CTRL_OFF_WIN_START + sizeof(uint32_t):
+         return s->ob_window_mr.addr >> 32;
+     case QEMU_EPC_CTRL_OFF_WIN_SIZE:
+-        return 0x100000;
++        return QEMU_EPC_OB_WINDOW_SIZE;
+     case QEMU_EPC_CTRL_OFF_WIN_SIZE + sizeof(uint32_t):
+         return 0;
+     case QEMU_EPC_CTRL_OFF_OB_MAP_MASK:
+@@ -558,7 +558,8 @@ static int qemu_epc_get_map_address(QemuEPCState *s, hwaddr phys, unsigned size,
+     for (int i = 0; i < 32; i++) {
+         struct qemu_epc_ob_map *map = &s->ob_map[i];
+ 
+-        if (phys < map->phys && phys >= map->phys + map->size) {
++        if (phys < map->phys || phys - map->phys >= map->size ||
++            size > map->size - (phys - map->phys)) {
+             continue;
+         }
+ 
+-- 
+2.53.0
+
