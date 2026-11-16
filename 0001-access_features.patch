@@ -1,0 +1,72 @@
+From 22e00db7342e8398dd00cae9462ad182ee992eb0 Mon Sep 17 00:00:00 2001
+From: TOKITA Hiroshi <tokita.hiroshi@gmail.com>
+Date: Mon, 16 Nov 2026 17:52:26 +0900
+Subject: [PATCH] access_features
+
+---
+ hw/misc/qemu-epc.c | 21 +++++++++++++++++++--
+ 1 file changed, 19 insertions(+), 2 deletions(-)
+
+diff --git a/hw/misc/qemu-epc.c b/hw/misc/qemu-epc.c
+index f27a4d2ed5..05552f8b8c 100644
+--- a/hw/misc/qemu-epc.c
++++ b/hw/misc/qemu-epc.c
+@@ -110,6 +110,7 @@ enum {
+     QEMU_EPC_ACCESS_OFFSET = 0x5c,
+     QEMU_EPC_ACCESS_DATA_LO = 0x60,
+     QEMU_EPC_ACCESS_DATA_HI = 0x64,
++    QEMU_EPC_ACCESS_FEATURES = 0x68,
+     QEMU_EPC_INTX_LEVEL = 0x6c,
+     QEMU_EPC_ACCESS_ID = 0x70,
+     QEMU_EPC_ACCESS_DONE = 0x74,
+@@ -120,15 +121,23 @@ enum {
+ /* DB_CTRL: the BAR that holds the doorbell range, and its enable bit */
+ #define QEMU_EPC_DB_CTRL_BAR_MASK 0x7
+ #define QEMU_EPC_DB_CTRL_ENABLE (1U << 31)
+-/* DB_STATUS: pending doorbell, write 1 to clear and deassert INTx */
++/* DB_CTRL: interrupt the endpoint when a software BAR access is posted */
++#define QEMU_EPC_DB_CTRL_ACCESS_IRQ (1U << 30)
++/* DB_STATUS: pending events, write 1 to clear; INTx is their logical OR */
+ #define QEMU_EPC_DB_STATUS_PENDING 0x1
++#define QEMU_EPC_DB_STATUS_ACCESS 0x2
++#define QEMU_EPC_DB_STATUS_MASK \
++    (QEMU_EPC_DB_STATUS_PENDING | QEMU_EPC_DB_STATUS_ACCESS)
++
++/* ACCESS_FEATURES: a posted software BAR access can interrupt the endpoint */
++#define QEMU_EPC_ACCESS_FEATURE_IRQ 0x1
+ 
+ static void qemu_epc_db_update_irq(void *opaque)
+ {
+     QemuEPCState *s = opaque;
+ 
+     pci_set_irq(&s->dev, !!(qatomic_read(&s->db_status) &
+-                            QEMU_EPC_DB_STATUS_PENDING));
++                            QEMU_EPC_DB_STATUS_MASK));
+ }
+ 
+ /* Called from the communication thread, without the BQL */
+@@ -167,6 +176,11 @@ static int qemu_epc_bar_access(QemuEPCState *s, int bar, size_t offset,
+     }
+     s->access_info = (1U << 31) | (write ? 1U << 30 : 0) |
+                      (bar << 16) | size;
++    if (qatomic_read(&s->db_ctrl) & QEMU_EPC_DB_CTRL_ACCESS_IRQ) {
++        qatomic_or(&s->db_status, QEMU_EPC_DB_STATUS_ACCESS);
++        aio_bh_schedule_oneshot(qemu_get_aio_context(),
++                                qemu_epc_db_update_irq, s);
++    }
+     while (s->access_info && s->started) {
+         if (g_get_monotonic_time() >= deadline) {
+             error_report("qemu-epc: BAR request timed out");
+@@ -213,6 +227,9 @@ static uint64_t qemu_epc_mmio_ctrl_read(void *opaque, hwaddr addr,
+         case QEMU_EPC_ACCESS_DATA_HI:
+             value = s->access_data >> 32;
+             break;
++        case QEMU_EPC_ACCESS_FEATURES:
++            value = QEMU_EPC_ACCESS_FEATURE_IRQ;
++            break;
+         case QEMU_EPC_ACCESS_ID:
+             value = s->access_id;
+             break;
+-- 
+2.53.0
+
