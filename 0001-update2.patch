@@ -1,0 +1,465 @@
+From 1733a00ce6590b794e006e49a0c1f67ef44fc875 Mon Sep 17 00:00:00 2001
+From: TOKITA Hiroshi <tokita.hiroshi@gmail.com>
+Date: Mon, 16 Nov 2026 16:28:57 +0900
+Subject: [PATCH] update2
+
+---
+ hw/misc/epf-bridge.c    |  54 ++++++----
+ hw/misc/qemu-epc-comm.c |   8 +-
+ hw/misc/qemu-epc.c      | 223 +++++++++++++++++++++++++++++++++-------
+ 3 files changed, 224 insertions(+), 61 deletions(-)
+
+diff --git a/hw/misc/epf-bridge.c b/hw/misc/epf-bridge.c
+index affe4529c9..0eb8870ae7 100644
+--- a/hw/misc/epf-bridge.c
++++ b/hw/misc/epf-bridge.c
+@@ -7,10 +7,10 @@
+ #include "qapi/error.h"
+ #include "hw/pci/pci_device.h"
+ #include "hw/pci/msi.h"
++#include "qemu/main-loop.h"
+ 
+ #include "qemu-epc-comm.h"
+ 
+-#define DEBUG_EPF_BRIDGE
+ #ifdef DEBUG_EPF_BRIDGE
+ #include "qemu/log.h"
+ #define epf_brd_debug(...) qemu_log("EPFBridge: " __VA_ARGS__)
+@@ -99,17 +99,35 @@ static int epf_bridge_handle_tlp_mw(EPFBridgeState *s, struct pci_tlp_mem *tlp)
+     return err;
+ }
+ 
++struct epf_irq_update {
++    EPFBridgeState *s;
++    bool asserted;
++};
++
++static void epf_bridge_update_irq(void *opaque)
++{
++    struct epf_irq_update *update = opaque;
++
++    pci_set_irq(&update->s->dev, update->asserted);
++    g_free(update);
++}
++
+ static int epf_bridge_handle_tlp_msg(EPFBridgeState *s, struct pci_tlp_msg *tlp)
+ {
+     enum PCI_TLP_IRQ_NUM irqn;
++    struct epf_irq_update *update;
+ 
+     irqn = qemu_epc_comm_irqn_from_tlp(tlp);
+     if (irqn == PCI_TLP_IRQ_INVALID) {
+         return -1;
+     }
+ 
+-    pci_set_irq(&s->dev, 1);
+-    pci_set_irq(&s->dev, 0);
++    update = g_new(struct epf_irq_update, 1);
++
++    update->s = s;
++    update->asserted = !(tlp->dw1.msg_code & 4);
++    aio_bh_schedule_oneshot(qemu_get_aio_context(),
++                           epf_bridge_update_irq, update);
+ 
+     return 0;
+ }
+@@ -296,22 +314,14 @@ static int epf_bridge_setup_bars(EPFBridgeState *s, PCIDevice *pci_dev)
+             continue;
+         }
+ 
+-        if (bar.flags & 0x1) {
+-            /* I/O type bar */
+-
+-            /*
+-             * Not supported yet, because the linux PCI endpoint framework
+-             * doesn't support I/O BAR acessing.
+-             */
+-        } else {
+-            epf_brd_debug("setup bar %d: size 0x%lx\n", i, bar.size);
+-            /* Memory type bar */
+-            memory_region_init_io(&meta->region, OBJECT(s),
+-                                  &epf_bridge_mbar_mmio_ops, meta, bar_name[i],
+-                                  bar.size);
+-            pci_register_bar(pci_dev, i, PCI_BASE_ADDRESS_SPACE_MEMORY,
+-                             &meta->region);
+-        }
++        memory_region_init_io(&meta->region, OBJECT(s),
++                              &epf_bridge_mbar_mmio_ops, meta, bar_name[i],
++                              bar.size);
++        pci_register_bar(pci_dev, i,
++                         bar.flags & PCI_BASE_ADDRESS_SPACE_IO ?
++                         PCI_BASE_ADDRESS_SPACE_IO :
++                         PCI_BASE_ADDRESS_SPACE_MEMORY,
++                         &meta->region);
+     }
+ 
+     return 0;
+@@ -453,6 +463,12 @@ static int epf_bridge_setup_pci_cfg_hdr(EPFBridgeState *s, PCIDevice *pci_dev)
+     pci_set_word(pci_dev->config + PCI_SUBSYSTEM_VENDOR_ID, data & 0xffff);
+     pci_set_word(pci_dev->config + PCI_SUBSYSTEM_ID, data >> 16);
+ 
++    err = qemu_epc_comm_config_read(s->req_fd, PCI_INTERRUPT_LINE, &data);
++    if (err) {
++        return err;
++    }
++    pci_config_set_interrupt_pin(pci_dev->config, (data >> 8) & 0xff);
++
+     return 0;
+ }
+ 
+diff --git a/hw/misc/qemu-epc-comm.c b/hw/misc/qemu-epc-comm.c
+index b1237fdb36..8134229123 100644
+--- a/hw/misc/qemu-epc-comm.c
++++ b/hw/misc/qemu-epc-comm.c
+@@ -486,7 +486,7 @@ int qemu_epc_comm_raise_irq(int fd, int intn)
+     };
+     ssize_t size;
+ 
+-    switch (intn) {
++    switch (intn & ~4) {
+     case 0:
+         tlp.dw1.msg_code = PCI_TLP_MSG_CODE_ASRT_INTA;
+         break;
+@@ -504,6 +504,10 @@ int qemu_epc_comm_raise_irq(int fd, int intn)
+         return -1;
+     }
+ 
++    if (intn & 4) {
++        tlp.dw1.msg_code |= 4;
++    }
++
+     size = send(fd, &mhdr, sizeof(mhdr), 0);
+     if (size != sizeof(mhdr)) {
+         qemu_log("%s:%d\n", __func__, __LINE__);
+@@ -521,7 +525,7 @@ int qemu_epc_comm_raise_irq(int fd, int intn)
+ 
+ enum PCI_TLP_IRQ_NUM qemu_epc_comm_irqn_from_tlp(struct pci_tlp_msg *tlp)
+ {
+-    switch (tlp->dw1.msg_code) {
++    switch (tlp->dw1.msg_code & ~4) {
+     case PCI_TLP_MSG_CODE_ASRT_INTA:
+         return PCI_TLP_IRQ_INTA;
+     case PCI_TLP_MSG_CODE_ASRT_INTB:
+diff --git a/hw/misc/qemu-epc.c b/hw/misc/qemu-epc.c
+index 468c9f72b7..f27a4d2ed5 100644
+--- a/hw/misc/qemu-epc.c
++++ b/hw/misc/qemu-epc.c
+@@ -6,10 +6,10 @@
+ #include "qom/object.h"
+ #include "hw/pci/pci_device.h"
+ #include "qemu/main-loop.h"
++#include "qemu/error-report.h"
+ 
+ #include "qemu-epc-comm.h"
+ 
+-#define DEBUG_QEMU_EPC
+ #ifdef DEBUG_QEMU_EPC
+ #include "qemu/log.h"
+ #define qemu_epc_debug(...) qemu_log("QemuEPC: " __VA_ARGS__)
+@@ -53,6 +53,18 @@ struct QemuEPCState {
+     uint32_t db_offset;
+     uint32_t db_size;
+     uint32_t db_status;
++    QemuMutex access_lock;
++    QemuCond access_cond;
++    bool started;
++    bool server_created;
++    uint32_t access_mask;
++    uint32_t access_info;
++    uint32_t access_offset;
++    uint64_t access_data;
++    uint32_t access_id;
++    uint32_t access_error;
++    uint64_t response_data;
++    uint32_t response_error;
+ };
+ 
+ #define TYPE_QEMU_EPC "qemu-epc"
+@@ -92,7 +104,17 @@ enum {
+     QEMU_EPC_CTRL_OFF_DB_SIZE = 0x48,
+     QEMU_EPC_CTRL_OFF_DB_STATUS = 0x4c,
+ 
+-    QEMU_EPC_CTRL_SIZE = QEMU_EPC_CTRL_OFF_DB_STATUS + sizeof(uint32_t)
++    QEMU_EPC_ACCESS_ABI = 0x50,
++    QEMU_EPC_ACCESS_MASK = 0x54,
++    QEMU_EPC_ACCESS_INFO = 0x58,
++    QEMU_EPC_ACCESS_OFFSET = 0x5c,
++    QEMU_EPC_ACCESS_DATA_LO = 0x60,
++    QEMU_EPC_ACCESS_DATA_HI = 0x64,
++    QEMU_EPC_INTX_LEVEL = 0x6c,
++    QEMU_EPC_ACCESS_ID = 0x70,
++    QEMU_EPC_ACCESS_DONE = 0x74,
++    QEMU_EPC_ACCESS_ERROR = 0x78,
++    QEMU_EPC_CTRL_SIZE = 0x80
+ };
+ 
+ /* DB_CTRL: the BAR that holds the doorbell range, and its enable bit */
+@@ -130,6 +152,37 @@ static void qemu_epc_db_check_write(QemuEPCState *s, int idx, size_t offset,
+     aio_bh_schedule_oneshot(qemu_get_aio_context(), qemu_epc_db_update_irq, s);
+ }
+ 
++/* Called with access_lock held; waiting releases it for guest completion. */
++static int qemu_epc_bar_access(QemuEPCState *s, int bar, size_t offset,
++                               size_t size, bool write, uint64_t *value)
++{
++    int64_t deadline = g_get_monotonic_time() + 5000000;
++    int ret = 0;
++
++    s->access_offset = offset;
++    s->access_data = *value;
++    s->access_error = 0;
++    if (++s->access_id == 0) {
++        ++s->access_id;
++    }
++    s->access_info = (1U << 31) | (write ? 1U << 30 : 0) |
++                     (bar << 16) | size;
++    while (s->access_info && s->started) {
++        if (g_get_monotonic_time() >= deadline) {
++            error_report("qemu-epc: BAR request timed out");
++            ret = -1;
++            break;
++        }
++        qemu_cond_timedwait(&s->access_cond, &s->access_lock, 100);
++    }
++    if (!s->started || s->access_error) {
++        ret = -1;
++    }
++    *value = ret ? UINT64_MAX : s->access_data;
++    s->access_info = 0;
++    return ret;
++}
++
+ static uint64_t qemu_epc_mmio_ctrl_read(void *opaque, hwaddr addr,
+                                         unsigned size)
+ {
+@@ -137,6 +190,36 @@ static uint64_t qemu_epc_mmio_ctrl_read(void *opaque, hwaddr addr,
+ 
+     qemu_epc_debug("CTRL read: addr 0x%lx, size 0x%x\n", addr, size);
+ 
++    if (addr >= QEMU_EPC_ACCESS_ABI && addr <= QEMU_EPC_ACCESS_ERROR) {
++        uint64_t value = 0;
++
++        qemu_mutex_lock(&s->access_lock);
++        switch (addr) {
++        case QEMU_EPC_ACCESS_ABI:
++            value = 0x45504331;
++            break;
++        case QEMU_EPC_ACCESS_MASK:
++            value = s->access_mask;
++            break;
++        case QEMU_EPC_ACCESS_INFO:
++            value = s->access_info;
++            break;
++        case QEMU_EPC_ACCESS_OFFSET:
++            value = s->access_offset;
++            break;
++        case QEMU_EPC_ACCESS_DATA_LO:
++            value = (uint32_t)s->access_data;
++            break;
++        case QEMU_EPC_ACCESS_DATA_HI:
++            value = s->access_data >> 32;
++            break;
++        case QEMU_EPC_ACCESS_ID:
++            value = s->access_id;
++            break;
++        }
++        qemu_mutex_unlock(&s->access_lock);
++        return value;
++    }
+     switch (addr) {
+     case QEMU_EPC_CTRL_OFF_WIN_START:
+         return s->ob_window_mr.addr;
+@@ -167,54 +250,61 @@ static int qemu_epc_handle_tlp_mr(QemuEPCState *s, int fd,
+                                   struct pci_tlp_mem *tlp,
+                                   struct qemu_epc_msg_hdr *mhdr)
+ {
+-    int err;
+     size_t offset = qemu_epc_comm_get_pci_addr_from_tlp(tlp);
+-    int idx = mhdr->bar.idx;
+-    hwaddr addr;
+     size_t length = qemu_epc_comm_tlp_data_length(&tlp->dw0);
+-    void *buf;
+-
+-    addr = s->bars[idx].phys_addr + offset;
+-    qemu_log("idx 0x%x, addr 0x%lx, offset 0x%lx, len 0x%lx\n", idx, addr,
+-             offset, length);
+-
+-    buf = pci_dma_map(&s->dev, addr, &length, DMA_DIRECTION_TO_DEVICE);
+-
+-    qemu_log("%s: 0x%x\n", __func__, *(uint32_t *)buf);
+-
+-    err = qemu_epc_comm_comp_with_data(fd, buf, length);
+-
+-    pci_dma_unmap(&s->dev, buf, length, DMA_DIRECTION_TO_DEVICE, length);
++    int idx = mhdr->bar.idx;
++    uint64_t value = UINT64_MAX;
++    uint8_t buf[8] = {0};
+ 
+-    return err;
++    if (!length || length > sizeof(buf)) {
++        return -1;
++    }
++    qemu_mutex_lock(&s->access_lock);
++    if (s->started && idx < 6 && offset <= s->bars[idx].size &&
++        length <= s->bars[idx].size - offset) {
++        if (s->access_mask & (1U << idx)) {
++            qemu_epc_bar_access(s, idx, offset, length, false, &value);
++        } else {
++            if (pci_dma_read(&s->dev, s->bars[idx].phys_addr + offset,
++                             buf, length) == MEMTX_OK) {
++                value = ldq_le_p(buf);
++            }
++        }
++    }
++    qemu_mutex_unlock(&s->access_lock);
++    stq_le_p(buf, value);
++    return qemu_epc_comm_comp_with_data(fd, buf, length);
+ }
+ 
+ static int qemu_epc_handle_tlp_mw(QemuEPCState *s, int fd,
+                                   struct pci_tlp_mem *tlp,
+                                   struct qemu_epc_msg_hdr *mhdr)
+ {
+-    int err;
+-    hwaddr addr;
+-    void *buf;
+-    int idx = mhdr->bar.idx;
+     size_t offset = qemu_epc_comm_get_pci_addr_from_tlp(tlp);
+     size_t length = qemu_epc_comm_tlp_data_length(&tlp->dw0);
++    int idx = mhdr->bar.idx;
++    uint8_t buf[8] = {0};
++    uint64_t value;
+ 
+-    addr = s->bars[idx].phys_addr + offset;
+-
+-    qemu_log("%s:%d addr 0x%lx, offset 0x%lx, len 0x%lx\n", __func__, __LINE__,
+-             addr, offset, length);
+-    buf = pci_dma_map(&s->dev, addr, &length, DMA_DIRECTION_FROM_DEVICE);
+-
+-    err = qemu_epc_comm_load_data(fd, buf, length);
+-
+-    pci_dma_unmap(&s->dev, buf, length, DMA_DIRECTION_FROM_DEVICE, length);
+-
+-    if (!err) {
+-        qemu_epc_db_check_write(s, idx, offset, length);
++    if (!length || length > sizeof(buf) ||
++        qemu_epc_comm_load_data(fd, buf, length)) {
++        return -1;
+     }
+-
+-    return err;
++    value = ldq_le_p(buf);
++    qemu_mutex_lock(&s->access_lock);
++    if (s->started && idx < 6 && offset <= s->bars[idx].size &&
++        length <= s->bars[idx].size - offset) {
++        if (s->access_mask & (1U << idx)) {
++            qemu_epc_bar_access(s, idx, offset, length, true, &value);
++        } else {
++            if (pci_dma_write(&s->dev, s->bars[idx].phys_addr + offset,
++                              buf, length) == MEMTX_OK) {
++                qemu_epc_db_check_write(s, idx, offset, length);
++            }
++        }
++    }
++    qemu_mutex_unlock(&s->access_lock);
++    return 0;
+ }
+ 
+ static int qemu_epc_handle_tlp_cr0(QemuEPCState *s, int fd,
+@@ -367,8 +457,19 @@ done:
+ 
+ static void qemu_epc_handle_ctrl_start(QemuEPCState *s, uint64_t val)
+ {
+-    qemu_thread_create(&s->thread, "qemu-epc", qemu_epc_thread, s,
+-                       QEMU_THREAD_JOINABLE);
++    qemu_mutex_lock(&s->access_lock);
++    s->started = !!val;
++    if (!s->started) {
++        s->access_error = 1;
++        s->access_info = 0;
++        qemu_cond_broadcast(&s->access_cond);
++    }
++    qemu_mutex_unlock(&s->access_lock);
++    if (val && !s->server_created) {
++        s->server_created = true;
++        qemu_thread_create(&s->thread, "qemu-epc", qemu_epc_thread, s,
++                           QEMU_THREAD_JOINABLE);
++    }
+ }
+ 
+ static void qemu_epc_handle_ctl_irq(QemuEPCState *s, uint64_t val)
+@@ -376,6 +477,9 @@ static void qemu_epc_handle_ctl_irq(QemuEPCState *s, uint64_t val)
+     int err;
+ 
+     err = qemu_epc_comm_raise_irq(s->req_fd, val);
++    if (!err) {
++        err = qemu_epc_comm_raise_irq(s->req_fd, val | 4);
++    }
+     if (err) {
+         qemu_epc_debug("Failed to raise irq\n");
+     }
+@@ -389,6 +493,40 @@ static void qemu_epc_mmio_ctrl_write(void *opaque, hwaddr addr, uint64_t val,
+ 
+     qemu_epc_debug("CTRL write: addr 0x%lx, size 0x%x\n", addr, size);
+ 
++    if (addr == QEMU_EPC_INTX_LEVEL) {
++        if (s->req_fd >= 0) {
++            qemu_epc_comm_raise_irq(s->req_fd, val ? 0 : 4);
++        }
++        return;
++    }
++    if (addr >= QEMU_EPC_ACCESS_ABI && addr <= QEMU_EPC_ACCESS_ERROR) {
++        qemu_mutex_lock(&s->access_lock);
++        switch (addr) {
++        case QEMU_EPC_ACCESS_MASK:
++            s->access_mask = val & 0x3f;
++            break;
++        case QEMU_EPC_ACCESS_DATA_LO:
++            s->response_data = (s->response_data & 0xffffffff00000000ULL) |
++                               (uint32_t)val;
++            break;
++        case QEMU_EPC_ACCESS_DATA_HI:
++            s->response_data = (s->response_data & 0xffffffffULL) | (val << 32);
++            break;
++        case QEMU_EPC_ACCESS_ERROR:
++            s->response_error = val;
++            break;
++        case QEMU_EPC_ACCESS_DONE:
++            if (s->access_info && (uint32_t)val == s->access_id) {
++                s->access_data = s->response_data;
++                s->access_error = s->response_error;
++                s->access_info = 0;
++                qemu_cond_signal(&s->access_cond);
++            }
++            break;
++        }
++        qemu_mutex_unlock(&s->access_lock);
++        return;
++    }
+     switch (addr) {
+     case QEMU_EPC_CTRL_OFF_START:
+         qemu_epc_handle_ctrl_start(s, val);
+@@ -629,7 +767,8 @@ static int qemu_epc_get_map_address(QemuEPCState *s, hwaddr phys, unsigned size,
+     for (int i = 0; i < 32; i++) {
+         struct qemu_epc_ob_map *map = &s->ob_map[i];
+ 
+-        if (phys < map->phys || phys - map->phys >= map->size ||
++        if (!(s->ob_map_mask & (1U << i)) || phys < map->phys ||
++            phys - map->phys >= map->size ||
+             size > map->size - (phys - map->phys)) {
+             continue;
+         }
+@@ -700,6 +839,10 @@ static void qemu_epc_realize(PCIDevice *pci_dev, Error **errp)
+ {
+     QemuEPCState *s = QEMU_EPC(pci_dev);
+ 
++    qemu_mutex_init(&s->access_lock);
++    qemu_cond_init(&s->access_cond);
++    s->req_fd = -1;
++
+     /* INTx reports the doorbell to the endpoint */
+     pci_config_set_interrupt_pin(pci_dev->config, 1);
+ 
+-- 
+2.53.0
+
