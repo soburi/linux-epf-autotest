@@ -1,4 +1,4 @@
-From 1d443071ff4b33641a94dd58c1772d063314dd2a Mon Sep 17 00:00:00 2001
+From de767a3398efd1fec5ac04ff1c0880b78ed3fb40 Mon Sep 17 00:00:00 2001
 From: TOKITA Hiroshi <tokita.hiroshi@gmail.com>
 Date: Sun, 15 Nov 2026 11:12:22 +0900
 Subject: [PATCH] selftests: pci_endpoint: makes a pci_endpoint_test binary

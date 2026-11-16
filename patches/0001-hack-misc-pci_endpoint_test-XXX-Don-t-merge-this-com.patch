@@ -1,4 +1,4 @@
-From b4161d6b8d0c708d8f455c2ce32a257e2bbc68f7 Mon Sep 17 00:00:00 2001
+From 7ea208648ed23e32a45f79d9ee8b1109da4a3f54 Mon Sep 17 00:00:00 2001
 From: Shunsuke Mie <mie@igel.co.jp>
 Date: Thu, 7 Mar 2024 15:58:37 +0900
 Subject: [PATCH] hack: misc: pci_endpoint_test: XXX: Don't merge this commit
@@ -10,10 +10,10 @@ LEGACY_IRQ.
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/drivers/misc/pci_endpoint_test.c b/drivers/misc/pci_endpoint_test.c
-index 74ab5b5b9011..967860179e07 100644
+index 6b18ea914689..3c7e37fb272c 100644
 --- a/drivers/misc/pci_endpoint_test.c
 +++ b/drivers/misc/pci_endpoint_test.c
-@@ -1027,8 +1027,8 @@ static int pci_endpoint_test_set_irq(struct pci_endpoint_test *test,
+@@ -1043,8 +1043,8 @@ static int pci_endpoint_test_set_irq(struct pci_endpoint_test *test,
  		else if (test->ep_caps & CAP_INTX)
  			req_irq_type = PCITEST_IRQ_TYPE_INTX;
  		else
